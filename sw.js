@@ -19,7 +19,7 @@
 //  ATTENTION : ce numero est le SEUL mecanisme de mise a jour. Tant qu'il ne
 //  change pas, une installation existante continuera de servir ses anciens
 //  fichiers, indefiniment. **A incrementer des qu'un fichier de `web/` change.**
-const VERSION = "yam-8b2eabb7";
+const VERSION = "yam-0826ecda";
 
 const FICHIERS = [
   "./",

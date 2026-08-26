@@ -162,11 +162,13 @@ button {
   padding: .5rem;
 }
 
+/* Six colonnes, comme le carton : l'intitule, les quatre colonnes de jeu, et
+   le total de la ligne — plus etroit, il ne recoit que des sommes. */
 .grille {
   display: grid;
-  grid-template-columns: 3.6rem repeat(4, 1fr);
+  grid-template-columns: 3.1rem repeat(4, 1fr) 2.5rem;
   gap: 2px;
-  max-width: 32rem;
+  max-width: 34rem;
   margin: 0 auto;
   font-variant-numeric: tabular-nums;
 }
@@ -186,7 +188,8 @@ button {
   font-size: clamp(.65rem, 2.9vw, .8rem);
   border: 1px solid var(--trait);
 }
-.entete-ligne { justify-content: flex-start; padding-left: .4rem; }
+/* Les intitules sont cales a droite, contre leur ligne, comme sur le carton. */
+.entete-ligne { justify-content: flex-end; padding-right: .3rem; }
 .entete-col { font-weight: 600; }
 
 .case {
@@ -223,8 +226,9 @@ button {
 .totaux { background: var(--carte); border: 1px solid var(--trait); color: var(--texte-doux); }
 .totaux.valeur { color: var(--texte); }
 .totaux.bonus-actif { color: var(--vert); font-weight: 600; }
-.totaux.grand { font-weight: 700; color: var(--texte); }
-.separateur { grid-column: 1 / -1; height: .35rem; }
+/* La colonne des totaux de ligne, et le total general en bas a droite. */
+.totaux.somme { background: var(--fond); font-size: clamp(.7rem, 3vw, .85rem); }
+.totaux.grand { font-weight: 700; color: var(--vert); background: var(--vert-clair); }
 
 /* --- Commandes ---------------------------------------------------------- */
 

@@ -35,9 +35,17 @@ const PARTIE_FINIE = "partie_finie";
 
 // Les noms du moteur sont en ASCII sans accent (ils servent aussi aux journaux
 // Rust). L'affichage, lui, est en francais correct.
+//
+// Deux jeux de noms, et ce n'est pas de la coquetterie : la **carte** reprend
+// les abreviations du carton familial, ou la place manque et ou l'on ecrit
+// « 3 » ; les **phrases** (conseils, tour de l'IA) disent « les 3 » et
+// « Desordre », qui se lisent. Le carton fait exactement pareil.
 const COLONNES = ["Descente", "Désordre", "Sec", "Montée"];
+const COLONNES_CARTE = ["Descente", "D", "S", "Montée"];
 const LIGNES = ["les 1", "les 2", "les 3", "les 4", "les 5", "les 6",
                 "−", "+", "Full", "Carré", "Suite", "Yam"];
+const LIGNES_CARTE = ["1", "2", "3", "4", "5", "6",
+                      "−", "+", "Full", "Carré", "Suite", "Yams"];
 
 // Les pastilles allumees d'une face, dans une grille 3x3 lue de gauche a droite.
 const PASTILLES = {
@@ -372,61 +380,110 @@ function rendreOnglets() {
   }
 }
 
+/// Les rangees de la carte, dans l'ordre du carton familial.
+///
+/// L'ordre n'est pas celui du moteur, et c'est tout l'interet : le sous-total,
+/// le bonus et le total de la premiere partie sont **intercales** juste apres
+/// les six chiffres, la ou on les calcule vraiment. Les mettre en bas, comme le
+/// faisait la premiere version, obligeait a chercher son bonus a l'autre bout
+/// de la feuille.
+function rangeesCarte() {
+  const r = [];
+  for (let l = 0; l < 6; l++) r.push({ jeu: l, nom: LIGNES_CARTE[l] });
+  r.push({ compte: "partie1", nom: "S/total" });
+  r.push({ compte: "bonus", nom: "Bonus" });
+  r.push({ compte: "total1", nom: "Total", somme: true });
+  for (let l = 6; l < constantes.NB_LIGNES; l++) r.push({ jeu: l, nom: LIGNES_CARTE[l], somme: true });
+  r.push({ general: true, nom: "Total" });
+  return r;
+}
+
 function rendreGrille() {
   const g = $("grille");
   const joueur = partie.joueurs[partie.vu];
   const sien = partie.vu === partie.courant;
+  const NL = constantes.NB_LIGNES;
+  const NC = constantes.NB_COLONNES;
 
   // Les cases jouables, et ce qu'elles rapporteraient. `options` donne les deux
   // en un appel, adosse a l'analyse deja faite : c'est gratuit.
   const apercu = new Map();
   if (sien && partie.etat === CHOIX_CASE && partie.analyse) {
     for (const o of partie.analyse.options(partie.des, partie.sec)) {
-      apercu.set(o.colonne * constantes.NB_LIGNES + o.ligne, o);
+      apercu.set(o.colonne * NL + o.ligne, o);
     }
+  }
+
+  const totaux = [];
+  for (let col = 0; col < NC; col++) {
+    const t = moteur.totauxColonne(joueur.feuille, col);
+    t.total1 = t.partie1 + t.bonus;      // ce que le carton appelle « Total »
+    totaux.push(t);
   }
 
   const morceaux = ['<div class="entete-ligne"></div>'];
-  for (const nom of COLONNES) morceaux.push(`<div class="entete-col">${nom}</div>`);
+  for (const nom of COLONNES_CARTE) morceaux.push(`<div class="entete-col">${nom}</div>`);
+  // La cinquieme colonne du carton n'a pas d'en-tete : c'est le total de la
+  // ligne, et il ne commence qu'a la rangee « Total ».
+  morceaux.push('<div class="entete-col"></div>');
 
-  for (let ligne = 0; ligne < constantes.NB_LIGNES; ligne++) {
-    morceaux.push(`<div class="entete-ligne">${LIGNES[ligne]}</div>`);
-    for (let col = 0; col < constantes.NB_COLONNES; col++) {
-      const valeur = joueur.feuille[col * constantes.NB_LIGNES + ligne];
-      const o = apercu.get(col * constantes.NB_LIGNES + ligne);
-      if (o) {
-        morceaux.push(
-          `<button class="case jouable${o.points === 0 ? " zero" : ""}"
-                   data-col="${col}" data-ligne="${ligne}"
-                   aria-label="${COLONNES[col]} ${LIGNES[ligne]}, ${o.points} points"
-           >${o.points === 0 ? "—" : o.points}</button>`);
-      } else if (valeur === constantes.VIDE) {
-        morceaux.push('<div class="case vide">·</div>');
-      } else if (valeur === 0) {
-        morceaux.push('<div class="case barree">—</div>');
-      } else {
-        morceaux.push(`<div class="case">${valeur}</div>`);
+  for (const rangee of rangeesCarte()) {
+    morceaux.push(`<div class="entete-ligne">${rangee.nom}</div>`);
+    let sommeLigne = 0;
+    let quelqueChose = false;
+
+    if (rangee.jeu !== undefined) {
+      const ligne = rangee.jeu;
+      for (let col = 0; col < NC; col++) {
+        const valeur = joueur.feuille[col * NL + ligne];
+        const o = apercu.get(col * NL + ligne);
+        if (valeur !== constantes.VIDE) {
+          sommeLigne += valeur;
+          quelqueChose = true;
+        }
+        if (o) {
+          morceaux.push(
+            `<button class="case jouable${o.points === 0 ? " zero" : ""}"
+                     data-col="${col}" data-ligne="${ligne}"
+                     aria-label="${COLONNES[col]} ${LIGNES[ligne]}, ${o.points} points"
+             >${o.points === 0 ? "—" : o.points}</button>`);
+        } else if (valeur === constantes.VIDE) {
+          morceaux.push('<div class="case vide">·</div>');
+        } else if (valeur === 0) {
+          morceaux.push('<div class="case barree">—</div>');
+        } else {
+          morceaux.push(`<div class="case">${valeur}</div>`);
+        }
       }
+    } else if (rangee.compte) {
+      // Ces trois comptes ne dependent que des six chiffres du haut. Tant qu'une
+      // colonne n'en a aucun, sa case reste **vide** : un carton vierge ne porte
+      // pas une rangee de zeros, et afficher « 0 » n'apprendrait rien. Une case
+      // barree, elle, compte bien — elle vaut zero pour de bon, et le zero
+      // s'affiche alors.
+      for (let col = 0; col < NC; col++) {
+        const t = totaux[col];
+        const commence = [...Array(6).keys()]
+          .some((l) => joueur.feuille[col * NL + l] !== constantes.VIDE);
+        const actif = rangee.compte === "bonus" && t.bonus > 0 ? " bonus-actif" : "";
+        morceaux.push(`<div class="totaux valeur${actif}">${commence ? t[rangee.compte] : ""}</div>`);
+        if (commence) {
+          sommeLigne += t[rangee.compte];
+          quelqueChose = true;
+        }
+      }
+    } else {
+      // La derniere rangee ne porte que le total general, en bas a droite.
+      for (let col = 0; col < NC; col++) morceaux.push('<div class="totaux"></div>');
+      morceaux.push(`<div class="totaux somme grand">${moteur.scoreTotal(joueur.feuille)}</div>`);
+      continue;
     }
-  }
 
-  // Les quatre lignes de totaux.
-  const totaux = [];
-  for (let col = 0; col < constantes.NB_COLONNES; col++) {
-    totaux.push(moteur.totauxColonne(joueur.feuille, col));
+    // Le total de la ligne, dans la cinquieme colonne.
+    morceaux.push(rangee.somme && quelqueChose
+      ? `<div class="totaux somme">${sommeLigne}</div>`
+      : '<div class="totaux somme"></div>');
   }
-  morceaux.push('<div class="separateur"></div>');
-  const rangee = (nom, cle, classe = "") => {
-    morceaux.push(`<div class="entete-ligne">${nom}</div>`);
-    for (const t of totaux) {
-      const actif = cle === "bonus" && t.bonus > 0 ? " bonus-actif" : "";
-      morceaux.push(`<div class="totaux valeur${classe}${actif}">${t[cle]}</div>`);
-    }
-  };
-  rangee("partie 1", "partie1");
-  rangee("bonus", "bonus");
-  rangee("partie 2", "partie2");
-  rangee("TOTAL", "total", " grand");
 
   g.innerHTML = morceaux.join("");
 }
