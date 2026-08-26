@@ -19,7 +19,7 @@
 //  ATTENTION : ce numero est le SEUL mecanisme de mise a jour. Tant qu'il ne
 //  change pas, une installation existante continuera de servir ses anciens
 //  fichiers, indefiniment. **A incrementer des qu'un fichier de `web/` change.**
-const VERSION = "yam-9712fde4";
+const VERSION = "yam-8b2eabb7";
 
 const FICHIERS = [
   "./",
@@ -35,10 +35,23 @@ const FICHIERS = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(VERSION)
-      .then((c) => c.addAll(FICHIERS))
-      .then(() => self.skipWaiting()));
+  // Pas de `skipWaiting()` ici, volontairement : le nouveau service worker
+  // reste en attente jusqu'a ce que le joueur accepte la mise a jour.
+  //
+  // Prendre la main tout de suite serait pire que ca en a l'air. La page en
+  // cours a deja charge son JavaScript et son module WebAssembly ; lui changer
+  // son service worker sous les pieds ne les remplace pas, mais met en place
+  // un cache d'une autre version pour tout ce qu'elle demanderait ensuite. On
+  // aurait alors deux versions melangees dans un meme onglet, ce qui est la
+  // panne la moins comprehensible qui soit. Et le joueur, lui, ne verrait
+  // toujours rien de nouveau avant d'avoir relance l'application deux fois.
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FICHIERS)));
+});
+
+// La page demande l'activation quand le joueur a accepte. Elle se rechargera
+// sur `controllerchange`, donc au moment ou la nouvelle version prend la main.
+self.addEventListener("message", (e) => {
+  if (e.data === "activer") self.skipWaiting();
 });
 
 self.addEventListener("activate", (e) => {

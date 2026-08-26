@@ -341,6 +341,8 @@ function annoncerFin() {
 function retourAccueil() {
   $("jeu").classList.add("cache");
   $("accueil").classList.remove("cache");
+  // C'est le seul moment sur pour recharger : aucune partie n'est en cours.
+  proposerMiseAJour();
 }
 
 // ==========================================================================
@@ -739,12 +741,84 @@ $("bouton-menu").addEventListener("click", () => {
 const enDeveloppement = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 if ("serviceWorker" in navigator) {
   if (!enDeveloppement || new URLSearchParams(location.search).has("sw")) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    installerServiceWorker();
   } else {
     // On defait ce qu'une visite precedente aurait pu installer.
     navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
     if (window.caches) caches.keys().then((noms) => noms.forEach((n) => caches.delete(n)));
   }
+}
+
+/// L'enregistrement du service worker, une fois obtenu.
+///
+/// C'est **lui** qui dit s'il y a une mise a jour en attente, via son champ
+/// `waiting`. Une premiere version memorisait le worker de son cote, au signal
+/// `updatefound` : deux etats a garder d'accord, et ils ont diverge des le
+/// premier essai — l'evenement etait manque, la mise a jour restait invisible
+/// alors qu'elle attendait. Un seul etat, lu a la source, ne peut pas mentir.
+let enregistrementSW = null;
+
+async function installerServiceWorker() {
+  try {
+    enregistrementSW = await navigator.serviceWorker.register("./sw.js");
+  } catch {
+    return;   // sans hors-ligne, mais le jeu marche
+  }
+  const r = enregistrementSW;
+
+  // Une mise a jour peut deja attendre, telechargee lors d'une visite
+  // precedente et jamais acceptee.
+  surveiller(r.waiting);
+  r.addEventListener("updatefound", () => surveiller(r.installing));
+
+  // La nouvelle version prend la main : on recharge pour la faire tourner.
+  let rechargement = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (rechargement) return;      // `controllerchange` peut se produire deux fois
+    rechargement = true;
+    location.reload();
+  });
+
+  // Une application lancee depuis l'ecran d'accueil est souvent *reprise*
+  // plutot que rechargee : sans cela, elle pourrait ne jamais rien demander au
+  // reseau et rester indefiniment sur son ancienne version.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) r.update().catch(() => {});
+  });
+}
+
+/// Suit un service worker jusqu'a ce qu'il soit installe, puis propose.
+///
+/// `controller` est nul a la toute premiere installation : ce n'est pas une
+/// mise a jour, il n'y a rien a proposer.
+function surveiller(worker) {
+  if (!worker || !navigator.serviceWorker.controller) return;
+  const verifier = () => {
+    if (worker.state === "installed") proposerMiseAJour();
+  };
+  worker.addEventListener("statechange", verifier);
+  // Il peut deja etre installe : `statechange` ne se rejouerait pas.
+  verifier();
+}
+
+/// Propose la mise a jour, mais **jamais au milieu d'une partie**.
+///
+/// L'accepter recharge la page, et une partie en cours n'est sauvegardee nulle
+/// part : elle serait perdue. On attend donc d'etre revenu a l'accueil, ou
+/// `retourAccueil` rappelle cette fonction. La nouvelle version est deja
+/// telechargee pendant ce temps — le joueur n'attend rien le moment venu.
+function proposerMiseAJour() {
+  const worker = enregistrementSW && enregistrementSW.waiting;
+  if (!worker) return;
+  if ($("accueil").classList.contains("cache")) return;   // une partie est en cours
+  ouvrirPanneau("Nouvelle version",
+    `<p>Une nouvelle version du jeu est prête.</p>
+     <p class="valeur">Elle est déjà téléchargée : la mise à jour est immédiate,
+        et le jeu continue de fonctionner hors ligne.</p>`,
+    [
+      { texte: "Plus tard", secondaire: true, action: () => fermerPanneau() },
+      { texte: "Mettre à jour", action: () => { fermerPanneau(); worker.postMessage("activer"); } },
+    ]);
 }
 
 demarrerModule();
