@@ -795,7 +795,7 @@ function conseil() {
            <p class="valeur">Score estimé : <b>${scoreEstime(c.valeur)}</b>, contre
               ${scoreEstime(c.valeur_arret)} en s'arrêtant maintenant.</p>`,
           [boutonFermer(),
-           { texte: "Cocher les dés à relancer", action: () => { fermerPanneau(); appliquerRelance(c.relancer); } }]);
+           { texte: "Relancer ces dés", action: () => { fermerPanneau(); relancerConseilles(c.relancer); } }]);
       }
       break;
     }
@@ -839,17 +839,22 @@ function conseil() {
   }
 }
 
-/// Coche les des a relancer, d'apres les faces conseillees.
+/// Relance les des que le conseil designe, sans etape intermediaire.
 ///
-/// Le conseil rend des **faces** (`[1, 2, 3]`), pas des positions : il faut donc
-/// les apparier, en veillant a ne pas cocher deux fois le meme de.
-function appliquerRelance(faces) {
+/// Une premiere version se contentait de les cocher, laissant le joueur appuyer
+/// ensuite sur « Relancer » — deux gestes pour une seule decision, alors que
+/// « Tout relancer » en demandait deja un seul. Les deux boutons du conseil
+/// agissent donc pareil.
+///
+/// Le conseil rend des **faces** (`[1, 2, 3]`), pas des positions : il faut les
+/// apparier, en veillant a ne pas cocher deux fois le meme de.
+function relancerConseilles(faces) {
   partie.relance = [false, false, false, false, false];
   for (const face of faces) {
     const i = partie.des.findIndex((v, k) => v === face && !partie.relance[k]);
     if (i >= 0) partie.relance[i] = true;
   }
-  rendre();
+  lancer();
 }
 
 // ==========================================================================
