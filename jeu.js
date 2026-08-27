@@ -822,8 +822,7 @@ function conseil() {
       ouvrirPanneau("Conseil",
         `<p>Les meilleures cases avec ces dés :</p><table>${lignes}</table>
          <p class="valeur">La dernière colonne est le score final que l'IA estime
-            si l'on joue cette case — bonus à venir compris. C'est ce qu'elle
-            maximise, et non les points inscrits tout de suite.</p>`,
+            si l'on joue cette case.</p>`,
         [boutonFermer(),
          { texte: "Jouer celle-là", action: () => { fermerPanneau(); jouerCase(meilleure.colonne, meilleure.ligne); } }]);
       break;
