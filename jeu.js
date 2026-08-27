@@ -1081,6 +1081,319 @@ function rafraichirAccueil() {
 }
 
 // ==========================================================================
+//  Les statistiques : les performances de l'IA
+//
+//  Tout ce qui suit est **mesure**, jamais calcule ici. Les chiffres viennent
+//  de `stats.json` et `des.json`, produits par deux programmes du moteur :
+//
+//      cargo run --release --example statistiques -- 1000000 data/poids_final.npz \
+//              rust/yam_wasm/web/stats.json
+//      cargo run --release --example des -- 600000000 rust/yam_wasm/web/des.json
+//
+//  L'application ne fait que les mettre en forme. C'est voulu : refaire une
+//  moyenne en JavaScript a partir de donnees resumees, c'est se donner deux
+//  sources de verite qui finiront par diverger.
+// ==========================================================================
+
+let mesures = null;      // { jeu, des }, charges a la premiere ouverture
+
+const nombre = (v, d = 0) =>
+  v.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const pourcent = (p, d = 1) => `${(100 * p).toFixed(d).replace(".", ",")} %`;
+
+$("bouton-stats").addEventListener("click", montrerStatistiques);
+$("stats-retour").addEventListener("click", () => {
+  $("stats").classList.add("cache");
+  $("accueil").classList.remove("cache");
+});
+
+async function montrerStatistiques() {
+  chauffeEnCours = false;
+  $("accueil").classList.add("cache");
+  $("stats").classList.remove("cache");
+  const corps = $("stats-corps");
+
+  if (!mesures) {
+    corps.innerHTML = '<p class="note">chargement des mesures…</p>';
+    try {
+      const [a, b] = await Promise.all([fetch("./stats.json"), fetch("./des.json")]);
+      const [jeu, des] = await Promise.all([a.json(), b.json()]);
+      mesures = { jeu, des };
+    } catch (e) {
+      corps.innerHTML = `<p class="note">mesures indisponibles : ${e.message}</p>`;
+      return;
+    }
+  }
+  corps.innerHTML = pageStatistiques(mesures);
+  corps.scrollTop = 0;
+}
+
+function pageStatistiques({ jeu, des }) {
+  return enTeteStats(jeu) + feuilleMoyenne(jeu) + scoreTotal(jeu) + figureHistogramme(jeu)
+       + tableauBonus(jeu) + tableauBarrages(jeu) + sectionYams(jeu) + sectionDivers(jeu)
+       + sectionDes(des);
+}
+
+function enTeteStats(s) {
+  return `<p><b>${nombre(s.parties)}</b> parties jouées par l'IA seule, du premier
+             lancer à la dernière case.</p>
+          <p class="note">Réseau entraîné, politique score-max — la même que dans
+             « Contre l'IA ». Mesuré le ${s.engendre_le}.</p>`;
+}
+
+// --- La feuille moyenne ----------------------------------------------------
+
+/// La carte, remplie de moyennes. Meme disposition que celle du jeu, a dessein :
+/// on lit la feuille de l'IA comme on lit la sienne.
+function feuilleMoyenne(s) {
+  const m = s.cases.moyenne;               // [colonne][ligne]
+  const c = s.colonnes;
+  const total1 = (col) => c.sous_total_p1[col] + c.bonus[col];
+  const sommeLigne = (f) => [0, 1, 2, 3].reduce((t, col) => t + f(col), 0);
+  const un = (v) => v.toFixed(1).replace(".", ",");
+
+  const cases = [];
+  cases.push('<div class="entete-ligne"></div>');
+  for (const nom of COLONNES) cases.push(`<div class="entete-col">${nom}</div>`);
+  cases.push('<div class="entete-col"></div>');
+
+  const rangeeJeu = (ligne) => {
+    cases.push(`<div class="entete-ligne">${LIGNES_CARTE[ligne]}</div>`);
+    for (let col = 0; col < 4; col++) cases.push(`<div class="case">${un(m[col][ligne])}</div>`);
+    cases.push(`<div class="totaux somme">${un(sommeLigne((col) => m[col][ligne]))}</div>`);
+  };
+  const rangeeCompte = (nom, valeur, avecSomme) => {
+    cases.push(`<div class="entete-ligne">${nom}</div>`);
+    for (let col = 0; col < 4; col++) cases.push(`<div class="totaux valeur">${un(valeur(col))}</div>`);
+    cases.push(avecSomme
+      ? `<div class="totaux somme">${un(sommeLigne(valeur))}</div>`
+      : '<div class="totaux somme"></div>');
+  };
+
+  for (let l = 0; l < 6; l++) rangeeJeu(l);
+  rangeeCompte("S/total", (col) => c.sous_total_p1[col], false);
+  rangeeCompte("Bonus", (col) => c.bonus[col], false);
+  rangeeCompte("Total", total1, true);
+  for (let l = 6; l < 12; l++) rangeeJeu(l);
+  cases.push('<div class="entete-ligne">Total</div>');
+  for (let col = 0; col < 4; col++) cases.push('<div class="totaux inerte"></div>');
+  cases.push(`<div class="totaux somme grand">${un(s.score.moyenne)}</div>`);
+
+  return `<h3>La feuille moyenne</h3>
+          <div class="large"><div class="grille">${cases.join("")}</div></div>
+          <p class="note">Points moyens inscrits dans chaque case, une case barrée
+             comptant zéro. La dernière colonne est la moyenne de la ligne, et le
+             coin le score moyen — ${un(s.score.moyenne)} points.</p>`;
+}
+
+// --- Le score total --------------------------------------------------------
+
+function scoreTotal(s) {
+  const q = s.score.quantiles;
+  const rangees = Object.entries(q)
+    .map(([p, v]) => `<tr><td>${p} %</td><td class="fort">${nombre(v)}</td></tr>`)
+    .join("");
+  return `<h3>Le score total</h3>
+    <p>Moyenne <span class="chiffre">${nombre(s.score.moyenne, 1)}</span>,
+       médiane <span class="chiffre">${nombre(q["50"])}</span>,
+       écart-type <span class="chiffre">${nombre(s.score.ecart_type, 1)}</span>.</p>
+    <p class="note">Du pire au meilleur : ${nombre(s.score.min)} à ${nombre(s.score.max)}.
+       L'incertitude sur la moyenne est de ± ${nombre(s.score.erreur_type, 2)}.</p>
+    <div class="large"><table>
+      <tr><th>quantile</th><th>score</th></tr>${rangees}
+    </table></div>
+    <p class="note">Un quantile de 25 % se lit : une partie sur quatre fait moins
+       de ${nombre(q["25"])} points.</p>`;
+}
+
+// --- L'histogramme, avec sa gaussienne de reference -------------------------
+
+/// Le trace, en SVG, sans bibliotheque.
+///
+/// Les classes font **un point**, ce qui donne plus de six cents barres : on
+/// dessine donc une silhouette pleine plutot que des rectangles. La gaussienne
+/// de meme moyenne et meme ecart-type est superposee — c'est la reference qui
+/// permet de voir ou la distribution reelle s'en ecarte.
+function figureHistogramme(s) {
+  const h = s.score.histogramme;
+  const e = h.effectifs;
+  const x0 = h.borne_min;
+  const n = e.length;
+  const maxi = Math.max(...e);
+  const L = 1000, H = 380, mg = { g: 6, d: 6, h: 14, b: 30 };
+
+  const px = (score) => mg.g + ((score - x0) / n) * (L - mg.g - mg.d);
+  const py = (compte) => H - mg.b - (compte / maxi) * (H - mg.h - mg.b);
+
+  // La silhouette : un segment par classe, en escalier.
+  let aire = `M ${px(x0).toFixed(1)} ${py(0).toFixed(1)}`;
+  for (let i = 0; i < n; i++) {
+    aire += ` L ${px(x0 + i).toFixed(1)} ${py(e[i]).toFixed(1)}`
+          + ` L ${px(x0 + i + 1).toFixed(1)} ${py(e[i]).toFixed(1)}`;
+  }
+  aire += ` L ${px(x0 + n).toFixed(1)} ${py(0).toFixed(1)} Z`;
+
+  // La gaussienne de meme moyenne et meme ecart-type, mise a la meme echelle :
+  // effectif attendu dans une classe de largeur 1.
+  const mu = s.score.moyenne, sigma = s.score.ecart_type, N = s.parties;
+  const densite = (x) =>
+    (N * h.largeur / (sigma * Math.sqrt(2 * Math.PI))) * Math.exp(-((x - mu) ** 2) / (2 * sigma * sigma));
+  const points = [];
+  for (let i = 0; i <= 200; i++) {
+    const x = x0 + (i / 200) * n;
+    points.push(`${px(x).toFixed(1)},${py(densite(x)).toFixed(1)}`);
+  }
+
+  // Quelques reperes en abscisse.
+  const graduations = [s.score.quantiles["1"], Math.round(mu), s.score.quantiles["99"]]
+    .map((v) => `<text x="${px(v).toFixed(1)}" y="${H - 6}" font-size="15" text-anchor="middle"
+                       fill="currentColor" opacity=".55">${nombre(v)}</text>`)
+    .join("");
+
+  return `<h3>La distribution des scores</h3>
+    <svg class="figure" viewBox="0 0 ${L} ${H}" role="img"
+         aria-label="histogramme des scores, classes d'un point, avec une gaussienne de référence">
+      <path class="barres" d="${aire}"/>
+      <polyline class="courbe" points="${points.join(" ")}"/>
+      <line class="repere" x1="${px(mu).toFixed(1)}" y1="${mg.h}" x2="${px(mu).toFixed(1)}" y2="${H - mg.b}"/>
+      <line class="axe" x1="${mg.g}" y1="${H - mg.b}" x2="${L - mg.d}" y2="${H - mg.b}"/>
+      ${graduations}
+    </svg>
+    <div class="legende">
+      <span class="mesure">mesuré, une classe par point</span>
+      <span class="gauss">gaussienne de même moyenne et même écart-type</span>
+    </div>
+    <p class="note">La distribution <b>penche à gauche</b> : son asymétrie vaut
+       ${nombre(s.score.asymetrie, 2)} là où une gaussienne vaut 0, et la médiane
+       (${nombre(s.score.quantiles["50"])}) dépasse la moyenne. Les mauvaises
+       parties s'éloignent donc plus que les bonnes — c'est le plafond du jeu qui
+       comprime le haut, il n'y a qu'un nombre fini de points à prendre.</p>
+    <p class="note">L'aplatissement vaut ${nombre(s.score.aplatissement, 2)} :
+       les queues sont un peu plus courtes que celles d'une gaussienne.</p>`;
+}
+
+// --- Le bonus --------------------------------------------------------------
+
+/// Le tableau du bonus, **transpose** : les paliers en lignes, les colonnes de
+/// la feuille en colonnes. Dans l'autre sens, sept colonnes ne tenaient pas sur
+/// un telephone et la moyenne, la plus utile, tombait hors de l'ecran.
+function tableauBonus(s) {
+  const c = s.colonnes;
+  const entetes = COLONNES.map((n) => `<th>${n}</th>`).join("");
+  const rangees = c.bonus_valeurs.map((valeur, i) => {
+    const cellules = [0, 1, 2, 3]
+      .map((col) => {
+        // On souligne, colonne par colonne, le palier le plus probable.
+        const plusProbable = c.bonus_proba[col].indexOf(Math.max(...c.bonus_proba[col])) === i;
+        return `<td class="${plusProbable ? "fort" : ""}">${pourcent(c.bonus_proba[col][i])}</td>`;
+      })
+      .join("");
+    return `<tr><td>${valeur} pt${valeur > 1 ? "s" : ""}</td>${cellules}</tr>`;
+  }).join("");
+  const moyens = [0, 1, 2, 3].map((col) => `<td class="fort">${nombre(c.bonus[col], 1)}</td>`).join("");
+  return `<h3>Le bonus, colonne par colonne</h3>
+    <div class="large"><table>
+      <tr><th>bonus</th>${entetes}</tr>${rangees}
+      <tr><td>moyen</td>${moyens}</tr>
+    </table></div>
+    <p class="note">Probabilité d'obtenir chaque palier ; le plus probable de
+       chaque colonne est en gras. Le bonus vaut 20 points à 60 de sous-total,
+       puis 10 de plus par dizaine, jusqu'à 60 points à 100.</p>`;
+}
+
+// --- Les barrages en partie 2 ----------------------------------------------
+
+function tableauBarrages(s) {
+  const b = s.cases.barrage;
+  const entetes = COLONNES.map((n) => `<th>${n}</th>`).join("");
+  const rangees = [];
+  for (let ligne = 6; ligne < 12; ligne++) {
+    const cellules = [0, 1, 2, 3].map((col) => `<td>${pourcent(b[col][ligne])}</td>`).join("");
+    rangees.push(`<tr><td>${LIGNES_CARTE[ligne]}</td>${cellules}</tr>`);
+  }
+  return `<h3>Barrer, en seconde partie</h3>
+    <div class="large"><table>
+      <tr><th>ligne</th>${entetes}</tr>${rangees.join("")}
+    </table></div>
+    <p class="note">Probabilité que la case finisse barrée. Seule la seconde
+       partie figure ici : au-dessus, un zéro peut aussi bien être un contrat
+       manqué qu'une case barrée, et les deux sont indiscernables sur la feuille.</p>`;
+}
+
+// --- Les yams --------------------------------------------------------------
+
+function sectionYams(s) {
+  const y = s.yams;
+  const r = y.repartition_notes
+    .map((p, k) => `<tr><td>${k} yam${k > 1 ? "s" : ""}</td><td class="fort">${pourcent(p, 2)}</td></tr>`)
+    .join("");
+  return `<h3>Les yams</h3>
+    <p>Cinq dés identiques <b>${nombre(y.obtenus_par_partie, 2)}</b> fois par partie,
+       dont <b>${nombre(y.secs_par_partie, 2)}</b> sur un lancer sec.</p>
+    <p>Mais seulement <b>${nombre(y.notes_par_partie, 2)}</b> case${y.notes_par_partie > 1 ? "s" : ""}
+       « yam » marquée${y.notes_par_partie > 1 ? "s" : ""} sur 4, pour
+       ${nombre(y.points_par_partie, 1)} points.</p>
+    <p class="note">L'écart entre les deux tient à deux choses : un yam peut tomber
+       dans une main qu'on ne garde pas, et il vaut parfois mieux l'inscrire
+       ailleurs — en « les 6 » ou en « carré ».</p>
+    <div class="large"><table>
+      <tr><th>cases « yam » marquées</th><th>des parties</th></tr>${r}
+    </table></div>
+    <p class="note">Une partie sur ${Math.round(1 / y.parties_sans_yam)} ne voit
+       aucun yam (${pourcent(y.parties_sans_yam)}).</p>`;
+}
+
+// --- Ou vont les points ----------------------------------------------------
+
+function sectionDivers(s) {
+  const d = s.divers;
+  const p1 = d.points_partie1_bonus_compris;
+  const p2 = d.points_partie2;
+  return `<h3>Où vont les points</h3>
+    <div class="large"><table>
+      <tr><td>première partie, bonus compris</td>
+          <td class="fort">${nombre(p1, 1)}</td><td>${pourcent(p1 / (p1 + p2))}</td></tr>
+      <tr><td>seconde partie</td>
+          <td class="fort">${nombre(p2, 1)}</td><td>${pourcent(p2 / (p1 + p2))}</td></tr>
+      <tr><td>cases barrées par partie</td>
+          <td class="fort">${nombre(d.cases_barrees_par_partie, 2)}</td><td>sur 48</td></tr>
+    </table></div>
+    <p class="note">L'IA barre donc ${nombre(d.cases_barrees_par_partie, 1)} cases
+       par partie en moyenne. Renoncer fait partie du jeu : s'acharner sur un yam
+       coûte plus cher que de sacrifier une case bon marché.</p>`;
+}
+
+// --- Les des ---------------------------------------------------------------
+
+function sectionDes(d) {
+  const tests = d.tests
+    .map((t) => `<tr><td>${t.nom}</td><td>${nombre(t.khi2, 1)}</td><td>${nombre(t.ddl)}</td>
+                     <td class="fort">${t.ecart >= 0 ? "+" : "−"}${Math.abs(t.ecart).toFixed(2).replace(".", ",")} σ</td></tr>`)
+    .join("");
+  const freq = d.frequences
+    .map((f, i) => `<tr><td>face ${i + 1}</td><td class="fort">${f.toFixed(4).replace(".", ",")} %</td></tr>`)
+    .join("");
+  return `<h3>Les dés sont-ils équilibrés ?</h3>
+    <p>Oui. Sur <b>${nombre(d.lancers)}</b> lancers, aucun test ne décèle le
+       moindre écart.</p>
+    <div class="large"><table>
+      <tr><th>test</th><th>khi²</th><th>ddl</th><th>écart</th></tr>${tests}
+    </table></div>
+    <p class="note">Un khi² proche de son nombre de degrés de liberté est le signe
+       d'un tirage honnête. Au-delà de +3 σ on soupçonnerait un biais ; en deçà
+       de −3 σ, une régularité artificielle — les deux seraient des défauts.</p>
+    <div class="large"><table>
+      <tr><th>fréquence observée</th><th>attendu 16,6667 %</th></tr>${freq}
+    </table></div>
+    <p class="note">Le générateur est un ${d.generateur}. Le tirage d'un dé passe
+       par une multiplication plutôt que par un reste de division : le biais de
+       troncature vaut ${d.biais_troncature}, et il faudrait de l'ordre de 10³⁷
+       lancers pour l'apercevoir. Ce n'est pas une opinion, c'est un calcul.</p>
+    <p class="note">À refaire :
+       <code>cargo run --release --example des -- 600000000</code></p>`;
+}
+
+// ==========================================================================
 //  Le panneau : conseils, confirmations, annonces
 // ==========================================================================
 

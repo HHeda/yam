@@ -314,6 +314,72 @@ button {
 .bouton:active:not(:disabled) { filter: brightness(.92); }
 .bouton .detail { display: block; font-weight: 400; font-size: .72rem; opacity: .85; }
 
+/* --- L'ecran des statistiques ------------------------------------------- */
+
+#entete-stats {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: calc(.4rem + env(safe-area-inset-top)) .5rem .4rem;
+  background: var(--carte);
+  border-bottom: 1px solid var(--trait);
+}
+#entete-stats h2 { margin: 0; font-size: 1.05rem; }
+
+#stats-corps {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: .75rem .75rem calc(1.5rem + env(safe-area-inset-bottom));
+  max-width: 34rem;
+  width: 100%;
+  margin: 0 auto;
+}
+#stats-corps h3 {
+  font-size: .95rem;
+  margin: 1.6rem 0 .4rem;
+  color: var(--vert);
+}
+#stats-corps h3:first-child { margin-top: 0; }
+#stats-corps p { margin: .35rem 0; font-size: .88rem; }
+#stats-corps .note { color: var(--texte-doux); font-size: .8rem; }
+#stats-corps .chiffre { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* Les tableaux de chiffres. Ils defilent horizontalement plutot que de
+   comprimer la page : c'est le tableau qui est large, pas l'ecran qui est
+   etroit. */
+#stats-corps .large { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+#stats-corps table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: .82rem;
+}
+#stats-corps th, #stats-corps td {
+  padding: .3rem .35rem;
+  border-bottom: 1px solid var(--trait);
+  text-align: right;
+  white-space: nowrap;
+}
+#stats-corps th { color: var(--texte-doux); font-weight: 600; }
+#stats-corps th:first-child, #stats-corps td:first-child { text-align: left; }
+#stats-corps td.fort { font-weight: 600; }
+
+/* L'histogramme. */
+.figure { width: 100%; height: auto; display: block; margin: .5rem 0 .2rem; }
+.figure .barres { fill: var(--vert-clair); stroke: none; }
+.figure .courbe { fill: none; stroke: var(--texte-doux); stroke-width: 1.6; stroke-dasharray: 5 4;
+                  vector-effect: non-scaling-stroke; }
+.figure .axe { stroke: var(--trait); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.figure .repere { stroke: var(--vert); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.legende { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .78rem; color: var(--texte-doux); }
+.legende span::before {
+  content: ""; display: inline-block; width: .8rem; height: .55rem;
+  margin-right: .3rem; vertical-align: middle;
+}
+.legende .mesure::before { background: var(--vert-clair); border: 1px solid var(--vert); }
+.legende .gauss::before { border-top: 2px dashed var(--texte-doux); height: 0; }
+
 /* --- Panneau (conseil, confirmations, fin de partie) -------------------- */
 
 #voile {

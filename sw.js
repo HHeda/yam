@@ -19,7 +19,7 @@
 //  ATTENTION : ce numero est le SEUL mecanisme de mise a jour. Tant qu'il ne
 //  change pas, une installation existante continuera de servir ses anciens
 //  fichiers, indefiniment. **A incrementer des qu'un fichier de `web/` change.**
-const VERSION = "yam-d60c6793";
+const VERSION = "yam-5733c460";
 
 const FICHIERS = [
   "./",
@@ -28,6 +28,8 @@ const FICHIERS = [
   "./jeu.js",
   "./yam.js",
   "./yam_wasm.wasm",
+  "./stats.json",
+  "./des.json",
   "./manifest.webmanifest",
   "./icone-192.png",
   "./icone-512.png",
