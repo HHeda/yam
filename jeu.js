@@ -989,10 +989,23 @@ function montrerHistorique() {
       "<p>Aucune partie terminée pour l'instant.</p>", [boutonFermer()]);
     return;
   }
-  // Le meilleur score personnel, tous modes confondus : c'est le chiffre qu'on
-  // vient chercher dans un historique.
-  const miens = h.flatMap((p) => p.scores.filter((s) => s.estVous !== false).map((s) => s.score));
-  const record = miens.length ? Math.max(...miens) : null;
+  // Les meilleurs scores personnels, **separes selon l'aide** : un score obtenu
+  // en suivant les conseils de l'IA et un score obtenu seul ne se comparent pas.
+  // Mesure a l'appui : 137 points sans aide contre 1399 en suivant le conseil.
+  //
+  // « Personnel » exclut le mode a deux, ou l'on ne sait pas laquelle des deux
+  // feuilles etait la sienne.
+  const mes = (p) => p.scores.filter((s) => s.estVous !== false).map((s) => s.score);
+  const meilleur = (parties) => {
+    const v = parties.flatMap(mes);
+    return v.length ? Math.max(...v) : null;
+  };
+  // On teste `=== true` / `=== false` : les parties archivees avant l'existence
+  // du drapeau valent `undefined` et ne concourent dans aucune des deux
+  // categories, faute de pouvoir dire a laquelle elles appartiennent.
+  const sansAide = meilleur(h.filter((p) => p.aide === false));
+  const avecAide = meilleur(h.filter((p) => p.aide === true));
+  const recordDe = (p) => (p.aide === true ? avecAide : p.aide === false ? sansAide : null);
 
   const quand = (t) => new Date(t).toLocaleDateString("fr-FR",
     { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -1000,7 +1013,10 @@ function montrerHistorique() {
 
   const lignes = h.map((p) => {
     const detail = p.scores.map((s) => `${s.score}`).join(" − ");
-    const record_ici = record !== null && p.scores.some((s) => s.estVous !== false && s.score === record);
+    // Une ligne est mise en avant si elle detient le record **de sa categorie** :
+    // c'est aux parties comparables qu'on se mesure.
+    const cible = recordDe(p);
+    const record_ici = cible !== null && mes(p).some((v) => v === cible);
     // `p.aide` est absent des parties archivees avant que ce drapeau existe :
     // pas d'etiquette, plutot qu'une affirmation qu'on ne peut pas verifier.
     const aide = p.aide ? ' <span class="etiquette">avec aide</span>' : "";
@@ -1011,8 +1027,18 @@ function montrerHistorique() {
             </tr>`;
   }).join("");
 
+  const records = [];
+  if (sansAide !== null) records.push(`<b>${sansAide}</b> sans aide`);
+  if (avecAide !== null) records.push(`<b>${avecAide}</b> avec aide`);
+  // Un historique entierement anterieur au drapeau n'a aucune categorie : on
+  // donne alors le meilleur score tout court, sans rien affirmer de plus.
+  if (records.length === 0) {
+    const tout = meilleur(h);
+    if (tout !== null) records.push(`<b>${tout}</b>`);
+  }
+
   ouvrirPanneau("Parties précédentes",
-    (record !== null ? `<p>Meilleur score : <b>${record}</b>.</p>` : "") +
+    (records.length ? `<p>Meilleur score : ${records.join(" · ")}.</p>` : "") +
     `<table>${lignes}</table>` +
     `<p class="valeur">${h.length} partie${h.length > 1 ? "s" : ""} conservée${h.length > 1 ? "s" : ""},
         sur cet appareil seulement.</p>`,
