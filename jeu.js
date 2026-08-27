@@ -53,6 +53,16 @@ const PASTILLES = {
 
 const $ = (id) => document.getElementById(id);
 
+/// Echappe un texte destine a `innerHTML`.
+///
+/// Les noms de joueurs sont **saisis** : ils finissent dans les onglets, les
+/// messages et le panneau de fin, tous construits par concatenation de HTML. Un
+/// nom contenant `<` casserait la mise en page, et le reste suivrait.
+function echapper(texte) {
+  return String(texte).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 let moteur = null;
 let constantes = null;
 /// Vrai tant que la chauffe du compilateur tourne ; le premier geste l'annule.
@@ -137,7 +147,14 @@ for (const bouton of document.querySelectorAll(".mode[data-mode]")) {
         "Nouvelle partie", "Annuler")) {
       return;
     }
-    nouvellePartie(bouton.dataset.mode);
+    const mode = bouton.dataset.mode;
+    if (mode === "duo") {
+      const noms = await demanderNoms();
+      if (!noms) return;
+      nouvellePartie(mode, noms);
+      return;
+    }
+    nouvellePartie(mode);
   });
 }
 
@@ -153,7 +170,44 @@ $("bouton-historique").addEventListener("click", montrerHistorique);
 //  La partie
 // ==========================================================================
 
-function nouvellePartie(mode) {
+const CLE_NOMS = "yam.noms.v1";
+const NOMS_PAR_DEFAUT = ["Joueur 1", "Joueur 2"];
+
+/// Demande les deux noms. Rend `null` si le joueur renonce.
+///
+/// Les noms de la derniere partie sont proposes : on joue rarement a deux une
+/// seule fois, et retaper deux noms a chaque partie serait une corvee.
+function demanderNoms() {
+  const anciens = lireMemoire(CLE_NOMS);
+  const proposes = Array.isArray(anciens) && anciens.length === 2 ? anciens : NOMS_PAR_DEFAUT;
+  return new Promise((resoudre) => {
+    fermeturePanneau = (r) => resoudre(r || null);
+    ouvrirPanneau("Qui joue ?",
+      `<p class="valeur">Chacun son tour, sur ce téléphone.</p>
+       <div class="champs">
+         <label>Premier joueur
+           <input id="nom-1" type="text" maxlength="14" autocomplete="off"
+                  enterkeyhint="next" value="${echapper(proposes[0])}"></label>
+         <label>Second joueur
+           <input id="nom-2" type="text" maxlength="14" autocomplete="off"
+                  enterkeyhint="done" value="${echapper(proposes[1])}"></label>
+       </div>`,
+      [
+        { texte: "Annuler", secondaire: true, action: () => fermerPanneau(null) },
+        { texte: "Commencer", action: () => {
+            // Un champ vide reprend son nom par defaut : mieux vaut un joueur
+            // nomme « Joueur 2 » qu'un onglet vide.
+            const noms = [1, 2].map((n, i) =>
+              ($(`nom-${n}`).value.trim() || NOMS_PAR_DEFAUT[i]).slice(0, 14));
+            ecrireMemoire(CLE_NOMS, noms);
+            fermerPanneau(noms);
+          } },
+      ]);
+    $("nom-1").select();
+  });
+}
+
+function nouvellePartie(mode, noms = NOMS_PAR_DEFAUT) {
   partie.mode = mode;
   // `estVous` n'est pas de la decoration : le verdict de fin de partie se dit
   // « Vous l'emportez » et non « Vous l'emporte », et deviner cela sur le nom
@@ -164,7 +218,7 @@ function nouvellePartie(mode) {
     ? [neuve("Vous", { estVous: true })]
     : mode === "ia"
       ? [neuve("Vous", { estVous: true }), neuve("IA", { estIA: true })]
-      : [neuve("Joueur 1"), neuve("Joueur 2")];
+      : [neuve(noms[0]), neuve(noms[1])];
   partie.courant = 0;
   partie.vu = 0;
   partie.tour = 1;
@@ -375,18 +429,23 @@ function annoncerFin() {
     ({ nom: j.nom, estVous: j.estVous, score: moteur.scoreTotal(j.feuille) }));
   inscrireAuxArchives(scores);
   oublierMemoire(CLE_PARTIE);
-  let corps = scores.map((s) => `<p><b>${s.nom}</b> : ${s.score} points</p>`).join("");
+  let corps = scores.map((s) => `<p><b>${echapper(s.nom)}</b> : ${s.score} points</p>`).join("");
   if (scores.length === 2) {
     const [a, b] = scores;
     const gagnant = a.score >= b.score ? a : b;
     corps += `<p>${a.score === b.score ? "Match nul."
       : gagnant.estVous ? "<b>Vous l'emportez !</b>"
-      : `<b>${gagnant.nom}</b> l'emporte.`}</p>`;
+      : `<b>${echapper(gagnant.nom)}</b> l'emporte.`}</p>`;
   }
   ouvrirPanneau("Partie terminée", corps, [
-    { texte: "Nouvelle partie", action: () => { fermerPanneau(); nouvellePartie(partie.mode); } },
+    { texte: "Nouvelle partie", action: () => { fermerPanneau(); rejouer(); } },
     { texte: "Changer de mode", secondaire: true, action: () => { fermerPanneau(); retourAccueil(); } },
   ]);
+}
+
+/// Relance une partie dans le meme mode, en gardant les memes joueurs.
+function rejouer() {
+  nouvellePartie(partie.mode, partie.joueurs.map((j) => j.nom));
 }
 
 function retourAccueil() {
@@ -420,7 +479,7 @@ function rendreOnglets() {
     b.className = "onglet" + (i === partie.courant ? " actif" : "");
     b.setAttribute("role", "tab");
     b.setAttribute("aria-selected", i === partie.vu ? "true" : "false");
-    b.innerHTML = `<span class="nom">${j.nom}</span>
+    b.innerHTML = `<span class="nom">${echapper(j.nom)}</span>
                    <span class="points">${moteur.scoreTotal(j.feuille)}</span>`;
     b.addEventListener("click", () => { partie.vu = i; rendre(); });
     zone.appendChild(b);
@@ -583,11 +642,11 @@ function desMini(valeurs, marques = null) {
 function rendreMessage() {
   const m = $("message");
   const joueur = partie.joueurs[partie.courant];
-  const qui = partie.joueurs.length > 1 ? `${joueur.nom} — ` : "";
+  const qui = partie.joueurs.length > 1 ? `${echapper(joueur.nom)} — ` : "";
   const sec = partie.sec && partie.des.length ? ' <span class="sec">SEC</span>' : "";
 
   if (partie.vu !== partie.courant) {
-    m.innerHTML = `feuille de ${partie.joueurs[partie.vu].nom}`;
+    m.innerHTML = `feuille de ${echapper(partie.joueurs[partie.vu].nom)}`;
     return;
   }
   switch (partie.etat) {
@@ -679,7 +738,7 @@ function rendreBoutons() {
       ajouter("Touchez une case verte", null, { secondaire: true, inactif: true });
       break;
     case PARTIE_FINIE:
-      ajouter("Nouvelle partie", () => nouvellePartie(partie.mode));
+      ajouter("Nouvelle partie", rejouer);
       break;
   }
 }
@@ -1035,7 +1094,7 @@ $("bouton-menu").addEventListener("click", () => {
      tour ${partie.tour} sur ${constantes.NB_CASES}.</p>`,
     [
       boutonFermer("Reprendre"),
-      { texte: "Nouvelle partie", action: () => { fermerPanneau(); nouvellePartie(partie.mode); } },
+      { texte: "Nouvelle partie", action: () => { fermerPanneau(); rejouer(); } },
       { texte: "Changer de mode", secondaire: true, action: () => { fermerPanneau(); retourAccueil(); } },
     ]);
 });

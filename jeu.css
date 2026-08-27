@@ -343,6 +343,27 @@ button {
 #panneau-corps .conseille td { color: var(--vert); font-weight: 600; }
 #panneau-boutons { display: flex; gap: .5rem; margin-top: .9rem; }
 
+/* La saisie des noms, en mode « à deux ». */
+.champs { display: flex; flex-direction: column; gap: .6rem; margin-top: .7rem; }
+.champs label {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  font-size: .8rem;
+  color: var(--texte-doux);
+}
+.champs input {
+  font: inherit;
+  font-size: 1rem;          /* sous 16 px, iOS zoome sur le champ actif */
+  color: var(--texte);
+  background: var(--fond);
+  border: 1px solid var(--trait);
+  border-radius: var(--rayon);
+  padding: .6rem .7rem;
+  min-height: 44px;
+}
+.champs input:focus { outline: 2px solid var(--vert); outline-offset: -1px; }
+
 /* Les des repris dans le panneau, en petit. */
 .des-mini { display: inline-flex; gap: .2rem; vertical-align: middle; }
 .des-mini b {
