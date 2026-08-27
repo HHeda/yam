@@ -19,7 +19,7 @@
 //  ATTENTION : ce numero est le SEUL mecanisme de mise a jour. Tant qu'il ne
 //  change pas, une installation existante continuera de servir ses anciens
 //  fichiers, indefiniment. **A incrementer des qu'un fichier de `web/` change.**
-const VERSION = "yam-5d80f98d";
+const VERSION = "yam-0eb6bebb";
 
 const FICHIERS = [
   "./",
@@ -34,6 +34,20 @@ const FICHIERS = [
   "./icone-maskable-512.png",
 ];
 
+/// Les requetes d'installation, **hors cache HTTP**.
+///
+/// `cache.addAll(["./jeu.js", ...])` passe par le cache HTTP du navigateur. Or
+/// GitHub Pages sert ces fichiers avec `max-age=600` : pendant dix minutes
+/// apres une mise en ligne, le nouveau `sw.js` s'installe et remplit son cache
+/// avec les **anciens** fichiers. Le piege s'est referme une fois : le cache
+/// `yam-5d80f98d` contenait un `jeu.js` de la version precedente, et le jeu
+/// tournait donc sur deux versions a la fois — exactement ce que le numero de
+/// version existe pour empecher.
+///
+/// `cache: "reload"` force le reseau pour chacun de ces fichiers. C'est le
+/// moment de le faire : on installe une version, elle doit etre entiere.
+const A_INSTALLER = FICHIERS.map((f) => new Request(f, { cache: "reload" }));
+
 self.addEventListener("install", (e) => {
   // Pas de `skipWaiting()` ici, volontairement : le nouveau service worker
   // reste en attente jusqu'a ce que le joueur accepte la mise a jour.
@@ -45,7 +59,7 @@ self.addEventListener("install", (e) => {
   // aurait alors deux versions melangees dans un meme onglet, ce qui est la
   // panne la moins comprehensible qui soit. Et le joueur, lui, ne verrait
   // toujours rien de nouveau avant d'avoir relance l'application deux fois.
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FICHIERS)));
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(A_INSTALLER)));
 });
 
 // La page demande l'activation quand le joueur a accepte. Elle se rechargera
