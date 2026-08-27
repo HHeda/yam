@@ -36,12 +36,10 @@ const PARTIE_FINIE = "partie_finie";
 // Les noms du moteur sont en ASCII sans accent (ils servent aussi aux journaux
 // Rust). L'affichage, lui, est en francais correct.
 //
-// Deux jeux de noms, et ce n'est pas de la coquetterie : la **carte** reprend
-// les abreviations du carton familial, ou la place manque et ou l'on ecrit
-// « 3 » ; les **phrases** (conseils, tour de l'IA) disent « les 3 » et
-// « Desordre », qui se lisent. Le carton fait exactement pareil.
+// Les colonnes portent le meme nom partout. Les **lignes**, elles, ont deux
+// formes : la carte ecrit « 3 », faute de place, la ou une phrase dit « les 3 ».
+// Le carton familial fait exactement la meme distinction.
 const COLONNES = ["Descente", "Désordre", "Sec", "Montée"];
-const COLONNES_CARTE = ["Descente", "D", "S", "Montée"];
 const LIGNES = ["les 1", "les 2", "les 3", "les 4", "les 5", "les 6",
                 "−", "+", "Full", "Carré", "Suite", "Yam"];
 const LIGNES_CARTE = ["1", "2", "3", "4", "5", "6",
@@ -422,7 +420,7 @@ function rendreGrille() {
   }
 
   const morceaux = ['<div class="entete-ligne"></div>'];
-  for (const nom of COLONNES_CARTE) morceaux.push(`<div class="entete-col">${nom}</div>`);
+  for (const nom of COLONNES) morceaux.push(`<div class="entete-col">${nom}</div>`);
   // La cinquieme colonne du carton n'a pas d'en-tete : c'est le total de la
   // ligne, et il ne commence qu'a la rangee « Total ».
   morceaux.push('<div class="entete-col"></div>');
@@ -474,7 +472,7 @@ function rendreGrille() {
       }
     } else {
       // La derniere rangee ne porte que le total general, en bas a droite.
-      for (let col = 0; col < NC; col++) morceaux.push('<div class="totaux"></div>');
+      for (let col = 0; col < NC; col++) morceaux.push('<div class="totaux inerte"></div>');
       morceaux.push(`<div class="totaux somme grand">${moteur.scoreTotal(joueur.feuille)}</div>`);
       continue;
     }
@@ -627,6 +625,20 @@ function rendreBoutons() {
 
 $("bouton-conseil").addEventListener("click", conseil);
 
+/// Le score **final** que l'IA estime, a partir d'une de ses valeurs.
+///
+/// Le moteur ne rend jamais un score final : il rend le **reste**, ce qu'il
+/// compte encore marquer d'ici la fin de la partie. C'est ce dont il a besoin,
+/// mais ce n'est pas ce qu'un joueur veut lire — « 847 » ne dit rien quand on
+/// en est a 500. On y rajoute donc ce qui est deja sur la feuille.
+///
+/// Les deux termes vont bien ensemble : le score acquis contient les bonus deja
+/// obtenus, et l'estimation du reste contient ceux qui restent a prendre.
+function scoreEstime(valeur) {
+  const feuille = partie.joueurs[partie.courant].feuille;
+  return Math.round(moteur.scoreTotal(feuille) + valeur);
+}
+
 function conseil() {
   if (!partie.analyse || partie.vu !== partie.courant) {
     ouvrirPanneau("Conseil", "<p>Lancez d'abord les dés.</p>", [boutonFermer()]);
@@ -642,13 +654,22 @@ function conseil() {
       if (c.action === "arreter") {
         ouvrirPanneau("Conseil",
           `<p>S'arrêter là.</p>
-           <p class="valeur">Valeur de cette main : ${c.valeur.toFixed(1)} points.</p>`,
+           <p class="valeur">Score estimé : <b>${scoreEstime(c.valeur)}</b>.</p>`,
           [boutonFermer(), { texte: "Garder", action: () => { fermerPanneau(); arreterMain(); } }]);
+      } else if (c.garder.length === 0) {
+        // Relancer les cinq des : il n'y a rien a cocher, et l'ecrire
+        // « garder — , relancer 1 2 3 4 5 » ne fait que noyer le conseil.
+        ouvrirPanneau("Conseil",
+          `<p>Relancer tout.</p>
+           <p class="valeur">Score estimé : <b>${scoreEstime(c.valeur)}</b>, contre
+              ${scoreEstime(c.valeur_arret)} en s'arrêtant maintenant.</p>`,
+          [boutonFermer(),
+           { texte: "Relancer tout", action: () => { fermerPanneau(); appliquerGarde([]); lancer(); } }]);
       } else {
         ouvrirPanneau("Conseil",
           `<p>Garder ${desMini(c.garder)}, relancer ${desMini(c.relancer)}.</p>
-           <p class="valeur">Valeur : ${c.valeur.toFixed(1)} contre
-              ${c.valeur_arret.toFixed(1)} en s'arrêtant maintenant.</p>`,
+           <p class="valeur">Score estimé : <b>${scoreEstime(c.valeur)}</b>, contre
+              ${scoreEstime(c.valeur_arret)} en s'arrêtant maintenant.</p>`,
           [boutonFermer(),
            { texte: "Cocher ces dés", action: () => { fermerPanneau(); appliquerGarde(c.garder); } }]);
       }
@@ -660,7 +681,8 @@ function conseil() {
       const v2 = a.valeurMain(partie.main2.des, partie.main2.sec);
       ouvrirPanneau("Conseil",
         `<p>Garder la <b>main ${n}</b>.</p>
-         <p class="valeur">Main 1 : ${v1.toFixed(1)} · main 2 : ${v2.toFixed(1)}.</p>`,
+         <p class="valeur">Score estimé : ${scoreEstime(v1)} avec la main 1,
+            ${scoreEstime(v2)} avec la main 2.</p>`,
         [boutonFermer(), { texte: `Garder la main ${n}`, action: () => { fermerPanneau(); garderMain(n); } }]);
       break;
     }
@@ -670,13 +692,14 @@ function conseil() {
         `<tr class="${i === 0 ? "conseille" : ""}">
            <td>${COLONNES[o.colonne]} / ${LIGNES[o.ligne]}</td>
            <td>${o.barree ? "barrer" : `${o.points} pt`}</td>
-           <td>${o.valeur.toFixed(1)}</td>
+           <td>${scoreEstime(o.valeur)}</td>
          </tr>`).join("");
       const meilleure = options[0];
       ouvrirPanneau("Conseil",
         `<p>Les meilleures cases avec ces dés :</p><table>${lignes}</table>
-         <p class="valeur">La dernière colonne est la valeur de la feuille qui en
-            résulte, bonus compris — c'est ce que l'IA maximise, pas les points.</p>`,
+         <p class="valeur">La dernière colonne est le score final que l'IA estime
+            si l'on joue cette case — bonus à venir compris. C'est ce qu'elle
+            maximise, et non les points inscrits tout de suite.</p>`,
         [boutonFermer(),
          { texte: "Jouer celle-là", action: () => { fermerPanneau(); jouerCase(meilleure.colonne, meilleure.ligne); } }]);
       break;
@@ -687,8 +710,8 @@ function conseil() {
       // que d'ouvrir un panneau vide.
       ouvrirPanneau("Conseil",
         `<p>Lancez d'abord les dés.</p>
-         <p class="valeur">À partir de cette feuille, l'IA compte marquer encore
-            ${a.valeur.toFixed(0)} points d'ici la fin de la partie.</p>`,
+         <p class="valeur">À partir de cette feuille, l'IA estime un score final
+            moyen de <b>${scoreEstime(a.valeur)}</b>.</p>`,
         [boutonFermer(), { texte: "Lancer les dés", action: () => { fermerPanneau(); lancer(); } }]);
   }
 }

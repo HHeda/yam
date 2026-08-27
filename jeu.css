@@ -228,6 +228,8 @@ button {
 .totaux.bonus-actif { color: var(--vert); font-weight: 600; }
 /* La colonne des totaux de ligne, et le total general en bas a droite. */
 .totaux.somme { background: var(--fond); font-size: clamp(.7rem, 3vw, .85rem); }
+/* Les cases ou l'on n'ecrit jamais rien : la derniere rangee, hors son coin. */
+.totaux.inerte { background: var(--fond); }
 .totaux.grand { font-weight: 700; color: var(--vert); background: var(--vert-clair); }
 
 /* --- Commandes ---------------------------------------------------------- */
