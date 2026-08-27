@@ -341,6 +341,17 @@ button {
 #panneau-corps td { padding: .22rem .3rem; border-bottom: 1px solid var(--trait); }
 #panneau-corps td:last-child { text-align: right; color: var(--texte-doux); }
 #panneau-corps .conseille td { color: var(--vert); font-weight: 600; }
+/* « avec aide » dans l'historique : une precision, pas un reproche. */
+.etiquette {
+  display: inline-block;
+  font-size: .68rem;
+  font-weight: 400;
+  color: var(--texte-doux);
+  border: 1px solid var(--trait);
+  border-radius: 999px;
+  padding: 0 .4rem;
+  white-space: nowrap;
+}
 #panneau-boutons { display: flex; gap: .5rem; margin-top: .9rem; }
 
 /* La saisie des noms, en mode « à deux ». */

@@ -86,6 +86,10 @@ const partie = {
   main1: null,      // { des, sec }
   main2: null,
   v1: 0,            // valeur de la main 1, pour le conseil de la main 2
+  // Vrai des que le joueur a consulte l'IA une fois dans la partie. C'est une
+  // information de fin de partie : un score obtenu en suivant les conseils ne
+  // se compare pas a un score obtenu seul.
+  aideUtilisee: false,
   // Vrai entre le coup de l'IA et son acquittement par le joueur. C'est
   // l'invariant sur lequel s'appuie la reprise : on ne sauvegarde un etat « au
   // tour de l'IA » qu'apres qu'elle a joue.
@@ -223,6 +227,7 @@ function nouvellePartie(mode, noms = NOMS_PAR_DEFAUT) {
   partie.vu = 0;
   partie.tour = 1;
   partie.iaAJoue = false;
+  partie.aideUtilisee = false;
   $("accueil").classList.add("cache");
   $("jeu").classList.remove("cache");
   fermerPanneau();
@@ -769,6 +774,9 @@ function conseil() {
     return;
   }
   const a = partie.analyse;
+  // Le panneau va donner un avis : la partie ne sera plus « sans aide ». Le cas
+  // ecarte ci-dessus (pas d'analyse) ne compte pas, il n'apprend rien.
+  partie.aideUtilisee = true;
   switch (partie.etat) {
     case MAIN1:
     case MAIN2: {
@@ -912,7 +920,7 @@ function sauverPartie() {
     courant: partie.courant, tour: partie.tour, etat: partie.etat,
     des: partie.des, relance: partie.relance, relances: partie.relances,
     sec: partie.sec, main1: partie.main1, main2: partie.main2, v1: partie.v1,
-    iaAJoue: partie.iaAJoue,
+    iaAJoue: partie.iaAJoue, aideUtilisee: partie.aideUtilisee,
   });
 }
 
@@ -936,7 +944,7 @@ function reprendrePartie() {
     courant: s.courant, tour: s.tour, etat: s.etat,
     des: s.des || [], relance: s.relance || [], relances: s.relances,
     sec: s.sec, main1: s.main1, main2: s.main2, v1: s.v1,
-    iaAJoue: !!s.iaAJoue, analyse: null,
+    iaAJoue: !!s.iaAJoue, aideUtilisee: !!s.aideUtilisee, analyse: null,
   });
   partie.vu = partie.courant;
 
@@ -970,7 +978,7 @@ function lireHistorique() {
 
 function inscrireAuxArchives(scores) {
   const h = lireHistorique();
-  h.unshift({ date: Date.now(), mode: partie.mode, scores });
+  h.unshift({ date: Date.now(), mode: partie.mode, scores, aide: partie.aideUtilisee });
   ecrireMemoire(CLE_HISTORIQUE, h.slice(0, HISTORIQUE_MAX));
 }
 
@@ -993,9 +1001,12 @@ function montrerHistorique() {
   const lignes = h.map((p) => {
     const detail = p.scores.map((s) => `${s.score}`).join(" − ");
     const record_ici = record !== null && p.scores.some((s) => s.estVous !== false && s.score === record);
+    // `p.aide` est absent des parties archivees avant que ce drapeau existe :
+    // pas d'etiquette, plutot qu'une affirmation qu'on ne peut pas verifier.
+    const aide = p.aide ? ' <span class="etiquette">avec aide</span>' : "";
     return `<tr class="${record_ici ? "conseille" : ""}">
               <td>${quand(p.date)}</td>
-              <td>${nomMode[p.mode] || p.mode}</td>
+              <td>${nomMode[p.mode] || p.mode}${aide}</td>
               <td>${detail}</td>
             </tr>`;
   }).join("");
