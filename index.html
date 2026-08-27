@@ -31,6 +31,11 @@
   <p class="sous-titre">Variante familiale — 12 lignes, 4 colonnes, 48 tours.</p>
 
   <div class="modes">
+    <!-- N'apparait que si une partie attend en memoire. -->
+    <button class="mode reprise cache" id="bouton-reprendre">
+      <span class="mode-titre">Reprendre la partie</span>
+      <span class="mode-detail" id="reprise-detail"></span>
+    </button>
     <button class="mode" data-mode="seul">
       <span class="mode-titre">Seul</span>
       <span class="mode-detail">Votre feuille, votre score.</span>
@@ -45,6 +50,7 @@
     </button>
   </div>
 
+  <button id="bouton-historique" class="lien cache">Parties précédentes</button>
   <p id="etat-chargement" class="attente">chargement du moteur…</p>
 </section>
 

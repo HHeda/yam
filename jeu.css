@@ -113,7 +113,21 @@ button {
 .mode-titre { font-weight: 600; font-size: 1.05rem; }
 .mode-detail { color: var(--texte-doux); font-size: .85rem; }
 
-.attente { color: var(--texte-doux); font-size: .85rem; margin-top: 1.5rem; min-height: 1.2em; }
+/* La reprise passe avant les modes : c'est ce qu'on vient faire. */
+.mode.reprise { border-color: var(--vert); background: var(--vert-clair); }
+.mode.reprise .mode-titre { color: var(--vert); }
+
+.lien {
+  margin-top: 1.25rem;
+  padding: .5rem 1rem;
+  min-height: 44px;
+  color: var(--texte-doux);
+  text-decoration: underline;
+  text-underline-offset: .2em;
+  font-size: .9rem;
+}
+
+.attente { color: var(--texte-doux); font-size: .85rem; margin-top: .75rem; min-height: 1.2em; }
 
 /* --- En-tete ------------------------------------------------------------ */
 
@@ -268,8 +282,11 @@ button {
   border: 2px solid var(--trait);
   border-radius: var(--rayon);
 }
-.de.garde {
+/* Un de marque est un de qu'on va **relancer** : on l'a ramasse. Le trait
+   discontinu dit « celui-la repart », la ou un trait plein dirait « acquis ». */
+.de.marque {
   border-color: var(--or);
+  border-style: dashed;
   /* La couleur plate d'abord : `color-mix` n'existe que depuis Safari 16.2, et
      un navigateur plus ancien gardera simplement celle-ci. */
   background: var(--vert-clair);
@@ -280,7 +297,8 @@ button {
                 width: .5rem; height: .5rem; }
 .de .creux { visibility: hidden; }
 
-.boutons { display: flex; gap: .5rem; }
+.boutons { display: flex; flex-direction: column; gap: .5rem; }
+.boutons .rangee { display: flex; gap: .5rem; }
 
 .bouton {
   flex: 1;
@@ -332,7 +350,7 @@ button {
   border: 1px solid var(--trait); border-radius: 4px; padding: .05rem .15rem;
   font-variant-numeric: tabular-nums;
 }
-.des-mini b.garde {
+.des-mini b.marque {
   border-color: var(--or);
   background: var(--vert-clair);
   background: color-mix(in srgb, var(--or) 16%, var(--carte));

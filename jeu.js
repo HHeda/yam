@@ -68,12 +68,18 @@ const partie = {
   etat: PRET_MAIN1,
   analyse: null,
   des: [],          // les 5 faces courantes
-  gardes: [],       // booleens, par position
+  // Booleens par position : vrai = ce de sera relance. C'est le geste reel —
+  // on ramasse les des qu'on rejette, pas ceux qu'on garde.
+  relance: [],
   relances: 0,
   sec: true,
   main1: null,      // { des, sec }
   main2: null,
   v1: 0,            // valeur de la main 1, pour le conseil de la main 2
+  // Vrai entre le coup de l'IA et son acquittement par le joueur. C'est
+  // l'invariant sur lequel s'appuie la reprise : on ne sauvegarde un etat « au
+  // tour de l'IA » qu'apres qu'elle a joue.
+  iaAJoue: false,
 };
 
 // ==========================================================================
@@ -84,8 +90,9 @@ async function demarrerModule() {
   try {
     moteur = await Moteur.charger("./yam_wasm.wasm", { avecReseau: true });
     constantes = moteur.constantes;
-    $("etat-chargement").textContent = "moteur prêt — choisissez un mode";
+    $("etat-chargement").textContent = "";
     for (const b of document.querySelectorAll(".mode")) b.disabled = false;
+    rafraichirAccueil();
     chauffer();
   } catch (e) {
     $("etat-chargement").textContent = `le moteur n'a pas pu démarrer : ${e.message}`;
@@ -119,13 +126,28 @@ async function chauffer() {
   chauffeEnCours = false;
 }
 
-for (const bouton of document.querySelectorAll(".mode")) {
+for (const bouton of document.querySelectorAll(".mode[data-mode]")) {
   bouton.disabled = true;
-  bouton.addEventListener("click", () => {
+  bouton.addEventListener("click", async () => {
     chauffeEnCours = false;
+    // Commencer une partie efface celle qui attendait : on ne le fait pas dans
+    // le dos du joueur.
+    if (partieEnMemoire() && !await confirmer("Abandonner la partie en cours ?",
+        "Une partie attend en mémoire. En commencer une nouvelle l'effacera définitivement.",
+        "Nouvelle partie", "Annuler")) {
+      return;
+    }
     nouvellePartie(bouton.dataset.mode);
   });
 }
+
+$("bouton-reprendre").disabled = true;
+$("bouton-reprendre").addEventListener("click", () => {
+  chauffeEnCours = false;
+  if (!reprendrePartie()) rafraichirAccueil();   // la sauvegarde a disparu
+});
+
+$("bouton-historique").addEventListener("click", montrerHistorique);
 
 // ==========================================================================
 //  La partie
@@ -146,6 +168,7 @@ function nouvellePartie(mode) {
   partie.courant = 0;
   partie.vu = 0;
   partie.tour = 1;
+  partie.iaAJoue = false;
   $("accueil").classList.add("cache");
   $("jeu").classList.remove("cache");
   fermerPanneau();
@@ -163,7 +186,7 @@ function commencerTour() {
   partie.analyse = moteur.analyser(joueur.feuille);
   partie.etat = PRET_MAIN1;
   partie.des = [];
-  partie.gardes = [];
+  partie.relance = [];
   partie.main1 = partie.main2 = null;
   partie.relances = 0;
   partie.sec = true;
@@ -175,11 +198,12 @@ function lancer() {
     premierLancer();
     partie.etat = partie.etat === PRET_MAIN1 ? MAIN1 : MAIN2;
   } else {
-    const gardees = partie.des.filter((_, i) => partie.gardes[i]);
+    const gardees = partie.des.filter((_, i) => !partie.relance[i]);
     partie.des = [...gardees, ...moteur.lancer(5 - gardees.length)].sort((a, b) => a - b);
-    // Le drapeau `sec` ne survit que si le lancer portait sur les 5 dés.
+    // Le drapeau `sec` ne survit que si le lancer portait sur les 5 dés — et il
+    // renait a chaque lancer complet, meme si la main l'avait perdu.
     partie.sec = gardees.length === 0;
-    partie.gardes = [false, false, false, false, false];
+    partie.relance = [false, false, false, false, false];
     partie.relances -= 1;
     if (partie.relances === 0) {
       arreterMain();
@@ -189,11 +213,20 @@ function lancer() {
   rendre();
 }
 
+/// Relance les cinq des, sans avoir a les cocher un par un.
+///
+/// C'est le geste le plus frequent d'un debut de main, et le seul qui redonne
+/// le drapeau `sec` : le passer par cinq touchers serait absurde.
+function toutRelancer() {
+  partie.relance = [true, true, true, true, true];
+  lancer();
+}
+
 function premierLancer() {
   partie.des = moteur.lancer(5).sort((a, b) => a - b);
   partie.relances = constantes.NB_RELANCES;
   partie.sec = true;          // le lancer initial porte sur les 5 dés
-  partie.gardes = [false, false, false, false, false];
+  partie.relance = [false, false, false, false, false];
 }
 
 function arreterMain() {
@@ -204,7 +237,7 @@ function arreterMain() {
     partie.v1 = partie.analyse.valeurMain(main.des, main.sec);
     partie.etat = PRET_MAIN2;
     partie.des = [];
-    partie.gardes = [];
+    partie.relance = [];
   } else {
     partie.main2 = main;
     partie.etat = CHOIX_MAIN;
@@ -216,7 +249,7 @@ function garderMain(numero) {
   const main = numero === 1 ? partie.main1 : partie.main2;
   partie.des = [...main.des];
   partie.sec = main.sec;
-  partie.gardes = [false, false, false, false, false];
+  partie.relance = [false, false, false, false, false];
   partie.etat = CHOIX_CASE;
   rendre();
 }
@@ -289,10 +322,20 @@ async function tourIA() {
   joueur.feuille = deroule.feuille;
   partie.analyse = null;
   partie.vu = partie.courant;
+  partie.iaAJoue = true;    // la sauvegarde qui suit est donc reprenable
   rendre();
 
   await annoncer(`L'IA joue`, corpsTourIA(deroule), "Suite");
+  await avancerApresIA();
+}
 
+/// Passe au joueur suivant, l'IA ayant joue.
+///
+/// Extrait de `tourIA` parce que la **reprise** en a besoin : une partie
+/// sauvegardee au tour de l'IA l'a forcement ete apres son coup, et il ne reste
+/// alors qu'a faire ceci.
+async function avancerApresIA() {
+  partie.iaAJoue = false;
   partie.courant = (partie.courant + 1) % partie.joueurs.length;
   if (partie.courant === 0) partie.tour += 1;
   if (partie.joueurs.every(feuillePleine)) {
@@ -330,6 +373,8 @@ function feuillePleine(joueur) {
 function annoncerFin() {
   const scores = partie.joueurs.map((j) =>
     ({ nom: j.nom, estVous: j.estVous, score: moteur.scoreTotal(j.feuille) }));
+  inscrireAuxArchives(scores);
+  oublierMemoire(CLE_PARTIE);
   let corps = scores.map((s) => `<p><b>${s.nom}</b> : ${s.score} points</p>`).join("");
   if (scores.length === 2) {
     const [a, b] = scores;
@@ -347,6 +392,7 @@ function annoncerFin() {
 function retourAccueil() {
   $("jeu").classList.add("cache");
   $("accueil").classList.remove("cache");
+  rafraichirAccueil();
   // C'est le seul moment sur pour recharger : aucune partie n'est en cours.
   proposerMiseAJour();
 }
@@ -361,6 +407,9 @@ function rendre() {
   rendreDes();
   rendreMessage();
   rendreBoutons();
+  // Un seul point de sauvegarde, appele a chaque changement d'etat : c'est ce
+  // qui garantit qu'on ne peut pas oublier d'enregistrer quelque part.
+  sauverPartie();
 }
 
 function rendreOnglets() {
@@ -492,13 +541,14 @@ $("grille").addEventListener("click", (e) => {
   if (case_) jouerCase(+case_.dataset.col, +case_.dataset.ligne);
 });
 
-function de(valeur, garde, cliquable) {
+function de(valeur, marque, cliquable) {
   const pastilles = Array.from({ length: 9 }, (_, i) =>
     `<span class="pastille${PASTILLES[valeur].includes(i) ? "" : " creux"}"></span>`).join("");
   const balise = cliquable ? "button" : "div";
-  return `<${balise} class="de${garde ? " garde" : ""}"
+  return `<${balise} class="de${marque ? " marque" : ""}"
             ${cliquable ? `data-de="1"` : ""}
-            aria-label="dé ${valeur}${garde ? ", gardé" : ""}">${pastilles}</${balise}>`;
+            aria-pressed="${marque}"
+            aria-label="dé ${valeur}${marque ? ", à relancer" : ""}">${pastilles}</${balise}>`;
 }
 
 function rendreDes() {
@@ -512,7 +562,7 @@ function rendreDes() {
   // On ne coche des dés que pendant une main, et seulement s'il reste un lancer.
   const cliquable = (partie.etat === MAIN1 || partie.etat === MAIN2) && partie.relances > 0;
   zone.innerHTML = partie.des
-    .map((v, i) => de(v, partie.gardes[i], cliquable))
+    .map((v, i) => de(v, partie.relance[i], cliquable))
     .join("");
 }
 
@@ -520,13 +570,13 @@ $("des").addEventListener("click", (e) => {
   const d = e.target.closest("[data-de]");
   if (!d) return;
   const i = [...$("des").children].indexOf(d);
-  partie.gardes[i] = !partie.gardes[i];
+  partie.relance[i] = !partie.relance[i];
   rendre();
 });
 
-function desMini(valeurs, gardes = null) {
+function desMini(valeurs, marques = null) {
   return '<span class="des-mini">' + valeurs
-    .map((v, i) => `<b class="${gardes && gardes[i] ? "garde" : ""}">${v}</b>`)
+    .map((v, i) => `<b class="${marques && marques[i] ? "marque" : ""}">${v}</b>`)
     .join("") + "</span>";
 }
 
@@ -568,13 +618,22 @@ function rendreMessage() {
 function rendreBoutons() {
   const zone = $("boutons");
   zone.innerHTML = "";
+  // Les commandes tiennent sur une ou deux rangees. A trois boutons cote a
+  // cote, la cible tactile tombe sous les 44 px recommandes ; on empile.
+  let rangee = null;
+  const nouvelleRangee = () => {
+    rangee = document.createElement("div");
+    rangee.className = "rangee";
+    zone.appendChild(rangee);
+  };
   const ajouter = (texte, action, options = {}) => {
+    if (!rangee) nouvelleRangee();
     const b = document.createElement("button");
     b.className = "bouton" + (options.secondaire ? " secondaire" : "");
     b.innerHTML = texte;
     b.disabled = !!options.inactif;
     if (action) b.addEventListener("click", action);
-    zone.appendChild(b);
+    rangee.appendChild(b);
     return b;
   };
 
@@ -592,13 +651,19 @@ function rendreBoutons() {
       break;
     case MAIN1:
     case MAIN2: {
-      const gardes = partie.gardes.filter(Boolean).length;
+      const n = partie.relance.filter(Boolean).length;
       ajouter(
-        `Relancer<span class="detail">${gardes === 0 ? "les 5 dés — reste SEC"
-          : `${5 - gardes} dé${5 - gardes > 1 ? "s" : ""}`}</span>`,
+        `Relancer<span class="detail">${n === 0 ? "aucun dé choisi"
+          : `${n} dé${n > 1 ? "s" : ""}`}</span>`,
         lancer,
-        { inactif: gardes === 5 });
-      ajouter("Garder<span class=\"detail\">arrêter cette main</span>", arreterMain, { secondaire: true });
+        { inactif: n === 0 });
+      // Relancer les cinq redonne toujours le drapeau `sec`, meme si la main
+      // l'avait perdu : c'est une information qui pese sur la decision.
+      ajouter('Tout relancer<span class="detail">les 5 dés · SEC</span>',
+        toutRelancer, { secondaire: true });
+      nouvelleRangee();
+      ajouter('Garder<span class="detail">arrêter cette main</span>',
+        arreterMain, { secondaire: true });
       break;
     }
     case CHOIX_MAIN:
@@ -664,14 +729,14 @@ function conseil() {
            <p class="valeur">Score estimé : <b>${scoreEstime(c.valeur)}</b>, contre
               ${scoreEstime(c.valeur_arret)} en s'arrêtant maintenant.</p>`,
           [boutonFermer(),
-           { texte: "Relancer tout", action: () => { fermerPanneau(); appliquerGarde([]); lancer(); } }]);
+           { texte: "Relancer tout", action: () => { fermerPanneau(); toutRelancer(); } }]);
       } else {
         ouvrirPanneau("Conseil",
           `<p>Garder ${desMini(c.garder)}, relancer ${desMini(c.relancer)}.</p>
            <p class="valeur">Score estimé : <b>${scoreEstime(c.valeur)}</b>, contre
               ${scoreEstime(c.valeur_arret)} en s'arrêtant maintenant.</p>`,
           [boutonFermer(),
-           { texte: "Cocher ces dés", action: () => { fermerPanneau(); appliquerGarde(c.garder); } }]);
+           { texte: "Cocher les dés à relancer", action: () => { fermerPanneau(); appliquerRelance(c.relancer); } }]);
       }
       break;
     }
@@ -716,17 +781,188 @@ function conseil() {
   }
 }
 
-/// Coche les des correspondant aux faces conseillees.
+/// Coche les des a relancer, d'apres les faces conseillees.
 ///
-/// Le conseil rend des **faces** (`[6, 6]`), pas des positions : il faut donc
+/// Le conseil rend des **faces** (`[1, 2, 3]`), pas des positions : il faut donc
 /// les apparier, en veillant a ne pas cocher deux fois le meme de.
-function appliquerGarde(faces) {
-  partie.gardes = [false, false, false, false, false];
+function appliquerRelance(faces) {
+  partie.relance = [false, false, false, false, false];
   for (const face of faces) {
-    const i = partie.des.findIndex((v, k) => v === face && !partie.gardes[k]);
-    if (i >= 0) partie.gardes[i] = true;
+    const i = partie.des.findIndex((v, k) => v === face && !partie.relance[k]);
+    if (i >= 0) partie.relance[i] = true;
   }
   rendre();
+}
+
+// ==========================================================================
+//  La memoire : la partie en cours, et l'historique
+//
+//  Tout tient dans `localStorage`, qui est le seul stockage dont on ait besoin
+//  ici : une feuille fait 48 entiers, une partie sauvegardee moins d'un
+//  kilo-octet. Rien ne sort de l'appareil.
+//
+//  Il peut echouer — navigation privee, stockage plein, reglages du
+//  navigateur — et jamais cela ne doit empecher de jouer. Chaque acces est donc
+//  protege, et l'absence de memoire est un cas normal, pas une panne.
+// ==========================================================================
+
+const CLE_PARTIE = "yam.partie.v1";
+const CLE_HISTORIQUE = "yam.historique.v1";
+const HISTORIQUE_MAX = 50;
+
+function lireMemoire(cle) {
+  try {
+    const t = localStorage.getItem(cle);
+    return t ? JSON.parse(t) : null;
+  } catch {
+    return null;      // pas de stockage, ou contenu illisible
+  }
+}
+
+function ecrireMemoire(cle, valeur) {
+  try {
+    localStorage.setItem(cle, JSON.stringify(valeur));
+  } catch { /* tant pis : on joue sans memoire */ }
+}
+
+function oublierMemoire(cle) {
+  try {
+    localStorage.removeItem(cle);
+  } catch { /* rien a faire */ }
+}
+
+/// Enregistre la partie en cours, ou efface la sauvegarde s'il n'y en a plus.
+///
+/// L'analyse du tour n'est **pas** sauvegardee : c'est un objet du moteur, et
+/// elle se refait en 5 ms a la reprise depuis la feuille du joueur courant, qui
+/// n'a pas change depuis le debut du tour.
+function sauverPartie() {
+  if (partie.joueurs.length === 0 || partie.etat === PARTIE_FINIE) {
+    oublierMemoire(CLE_PARTIE);
+    return;
+  }
+  ecrireMemoire(CLE_PARTIE, {
+    mode: partie.mode,
+    joueurs: partie.joueurs.map((j) => ({
+      nom: j.nom, estIA: j.estIA, estVous: j.estVous, feuille: Array.from(j.feuille),
+    })),
+    courant: partie.courant, tour: partie.tour, etat: partie.etat,
+    des: partie.des, relance: partie.relance, relances: partie.relances,
+    sec: partie.sec, main1: partie.main1, main2: partie.main2, v1: partie.v1,
+    iaAJoue: partie.iaAJoue,
+  });
+}
+
+/// La partie sauvegardee, si elle est exploitable.
+function partieEnMemoire() {
+  const s = lireMemoire(CLE_PARTIE);
+  if (!s || !Array.isArray(s.joueurs) || s.joueurs.length === 0) return null;
+  if (s.joueurs.some((j) => !Array.isArray(j.feuille) || j.feuille.length !== constantes.NB_CASES)) {
+    return null;    // format d'une autre version : on l'ignore plutot que de planter
+  }
+  return s;
+}
+
+function reprendrePartie() {
+  const s = partieEnMemoire();
+  if (!s) return false;
+
+  Object.assign(partie, {
+    mode: s.mode,
+    joueurs: s.joueurs.map((j) => ({ ...j, feuille: Int32Array.from(j.feuille) })),
+    courant: s.courant, tour: s.tour, etat: s.etat,
+    des: s.des || [], relance: s.relance || [], relances: s.relances,
+    sec: s.sec, main1: s.main1, main2: s.main2, v1: s.v1,
+    iaAJoue: !!s.iaAJoue, analyse: null,
+  });
+  partie.vu = partie.courant;
+
+  $("accueil").classList.add("cache");
+  $("jeu").classList.remove("cache");
+
+  // On ne sauvegarde un etat « au tour de l'IA » qu'apres qu'elle a joue : sa
+  // feuille est donc a jour, et il ne reste qu'a passer au joueur suivant.
+  if (partie.joueurs[partie.courant].estIA && partie.iaAJoue) {
+    avancerApresIA();
+    return true;
+  }
+  partie.analyse = moteur.analyser(partie.joueurs[partie.courant].feuille);
+  rendre();
+  return true;
+}
+
+/// Un resume d'une ligne, pour le bouton de reprise.
+function resumeParties(s) {
+  const nom = { seul: "Seul", ia: "Contre l'IA", duo: "À deux" }[s.mode] || s.mode;
+  const scores = s.joueurs.map((j) => moteur.scoreTotal(Int32Array.from(j.feuille)));
+  return `${nom} — tour ${s.tour} sur ${constantes.NB_CASES}, ${scores.join(" contre ")} points`;
+}
+
+// --- L'historique ---------------------------------------------------------
+
+function lireHistorique() {
+  const h = lireMemoire(CLE_HISTORIQUE);
+  return Array.isArray(h) ? h : [];
+}
+
+function inscrireAuxArchives(scores) {
+  const h = lireHistorique();
+  h.unshift({ date: Date.now(), mode: partie.mode, scores });
+  ecrireMemoire(CLE_HISTORIQUE, h.slice(0, HISTORIQUE_MAX));
+}
+
+function montrerHistorique() {
+  const h = lireHistorique();
+  if (h.length === 0) {
+    ouvrirPanneau("Parties précédentes",
+      "<p>Aucune partie terminée pour l'instant.</p>", [boutonFermer()]);
+    return;
+  }
+  // Le meilleur score personnel, tous modes confondus : c'est le chiffre qu'on
+  // vient chercher dans un historique.
+  const miens = h.flatMap((p) => p.scores.filter((s) => s.estVous !== false).map((s) => s.score));
+  const record = miens.length ? Math.max(...miens) : null;
+
+  const quand = (t) => new Date(t).toLocaleDateString("fr-FR",
+    { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const nomMode = { seul: "Seul", ia: "IA", duo: "À deux" };
+
+  const lignes = h.map((p) => {
+    const detail = p.scores.map((s) => `${s.score}`).join(" − ");
+    const record_ici = record !== null && p.scores.some((s) => s.estVous !== false && s.score === record);
+    return `<tr class="${record_ici ? "conseille" : ""}">
+              <td>${quand(p.date)}</td>
+              <td>${nomMode[p.mode] || p.mode}</td>
+              <td>${detail}</td>
+            </tr>`;
+  }).join("");
+
+  ouvrirPanneau("Parties précédentes",
+    (record !== null ? `<p>Meilleur score : <b>${record}</b>.</p>` : "") +
+    `<table>${lignes}</table>` +
+    `<p class="valeur">${h.length} partie${h.length > 1 ? "s" : ""} conservée${h.length > 1 ? "s" : ""},
+        sur cet appareil seulement.</p>`,
+    [boutonFermer(),
+     { texte: "Tout effacer", secondaire: true, action: async () => {
+         fermerPanneau();
+         if (await confirmer("Effacer l'historique ?",
+             "Les parties précédentes seront définitivement oubliées.",
+             "Effacer", "Annuler")) {
+           oublierMemoire(CLE_HISTORIQUE);
+           rafraichirAccueil();
+         }
+       } }]);
+}
+
+// --- L'accueil ------------------------------------------------------------
+
+/// Met l'accueil au diapason de ce qu'il y a en memoire.
+function rafraichirAccueil() {
+  const s = partieEnMemoire();
+  const bouton = $("bouton-reprendre");
+  bouton.classList.toggle("cache", !s);
+  if (s) $("reprise-detail").textContent = resumeParties(s);
+  $("bouton-historique").classList.toggle("cache", lireHistorique().length === 0);
 }
 
 // ==========================================================================
