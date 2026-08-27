@@ -352,7 +352,11 @@ button {
   padding: 0 .4rem;
   white-space: nowrap;
 }
-#panneau-boutons { display: flex; gap: .5rem; margin-top: .9rem; }
+/* Les actions du panneau. Elles passent a la ligne plutot que de se serrer :
+   le menu en compte quatre, et une cible tactile sous 44 px n'est pas une
+   cible. */
+#panneau-boutons { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .9rem; }
+#panneau-boutons .bouton { flex: 1 1 8.5rem; }
 
 /* La saisie des noms, en mode « à deux ». */
 .champs { display: flex; flex-direction: column; gap: .6rem; margin-top: .7rem; }

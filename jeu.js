@@ -448,6 +448,21 @@ function annoncerFin() {
   ]);
 }
 
+/// Abandonne la partie en cours et revient a l'accueil.
+///
+/// Vider `partie.joueurs` n'est pas cosmetique : c'est ce que `sauverPartie`
+/// regarde pour effacer la sauvegarde, donc un rendu ulterieur ne peut pas
+/// ressusciter la partie qu'on vient de quitter.
+///
+/// Rien n'est inscrit a l'historique : une partie interrompue n'a pas de score
+/// final, et l'y faire figurer fausserait les records.
+function quitterPartie() {
+  partie.joueurs = [];
+  partie.analyse = null;
+  oublierMemoire(CLE_PARTIE);
+  retourAccueil();
+}
+
 /// Relance une partie dans le meme mode, en gardant les memes joueurs.
 function rejouer() {
   nouvellePartie(partie.mode, partie.joueurs.map((j) => j.nom));
@@ -1130,14 +1145,31 @@ $("voile").addEventListener("click", () => {
 // ==========================================================================
 
 $("bouton-menu").addEventListener("click", () => {
+  // « Changer de mode » laisse la partie en memoire — l'accueil proposera de la
+  // reprendre. « Quitter » l'efface. La distinction est dite dans le corps du
+  // panneau plutot que dans des libelles a rallonge.
+  const enCours = partie.joueurs.length > 0 && partie.etat !== PARTIE_FINIE;
+  const boutons = [
+    boutonFermer("Reprendre"),
+    { texte: "Nouvelle partie", action: () => { fermerPanneau(); rejouer(); } },
+    { texte: "Changer de mode", secondaire: true, action: () => { fermerPanneau(); retourAccueil(); } },
+  ];
+  if (enCours) {
+    boutons.push({ texte: "Quitter la partie", secondaire: true, action: async () => {
+      fermerPanneau();
+      if (await confirmer("Quitter la partie ?",
+          "Elle sera perdue : rien n'en est conservé ailleurs, et elle ne comptera pas dans l'historique.",
+          "Quitter", "Annuler")) {
+        quitterPartie();
+      }
+    } });
+  }
   ouvrirPanneau("Menu",
     `<p class="valeur">Mode « ${{ seul: "seul", ia: "contre l'IA", duo: "à deux" }[partie.mode]} »,
-     tour ${partie.tour} sur ${constantes.NB_CASES}.</p>`,
-    [
-      boutonFermer("Reprendre"),
-      { texte: "Nouvelle partie", action: () => { fermerPanneau(); rejouer(); } },
-      { texte: "Changer de mode", secondaire: true, action: () => { fermerPanneau(); retourAccueil(); } },
-    ]);
+     tour ${partie.tour} sur ${constantes.NB_CASES}.</p>` +
+    (enCours ? `<p class="valeur">« Changer de mode » garde la partie : l'accueil
+       proposera de la reprendre.</p>` : ""),
+    boutons);
 });
 
 // ==========================================================================
